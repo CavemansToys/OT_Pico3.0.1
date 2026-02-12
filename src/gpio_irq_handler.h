@@ -5,7 +5,7 @@
 #include "pico/sync.h"
 
 /*
-    The RP2040 can only register one function for GPIO interrupts.
+    The RP2350 can only register one function for GPIO interrupts.
     This header creates an interface using a jump table,
     allowing the user to attach pin and core specific callback functions.
 

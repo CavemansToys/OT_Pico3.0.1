@@ -19,6 +19,7 @@
 #include "common.h"
 #include "display.h"  // in case the stepper motor driver failed to initialize
 #include "neopixel_led.h" // in case the stepper motor driver failed to initialize
+#include "error.h"
 
 #define STEPPER_LOW_CYCLE_COUNT 13  // Defined as the implementation of stepper.pio
 #define MAX_RESPONSE_TIME   0.01f   // Maximum response time for PIO stepper
@@ -35,6 +36,10 @@ typedef struct {
 // Configurations
 motor_config_t coarse_trickler_motor_config;
 motor_config_t fine_trickler_motor_config;
+
+// Global motor state
+bool motors_enabled = true;    // User setting: enable/disable motors
+bool motors_detected = false;  // Runtime: were motors actually found
 
 
 const motor_persistent_config_t default_motor_persistent_config = {
@@ -161,6 +166,9 @@ TMC_uart_write_datagram_t *tmc_uart_read (trinamic_motor_t driver, TMC_uart_read
 
 uint32_t speed_to_period(float speed, uint32_t pio_clock_speed, uint32_t full_rotation_steps) {
     // speed: rev/s
+    if (speed <= 0.0f) {
+        return 0;  // Motor stopped
+    }
     float step_speed = full_rotation_steps * speed;    // in steps/s
 
     uint32_t full_cycle_count = lroundf(pio_clock_speed / step_speed);
@@ -327,13 +335,16 @@ bool motor_config_init(void) {
     // Read motor config from EEPROM
     eeprom_motor_data_t eeprom_motor_data;
     is_ok = eeprom_read(EEPROM_MOTOR_CONFIG_BASE_ADDR, (uint8_t *)&eeprom_motor_data, sizeof(eeprom_motor_data_t));
+
+    bool need_defaults = false;
     if (!is_ok) {
-        printf("Unable to read from EEPROM at address %x\n", EEPROM_MOTOR_CONFIG_BASE_ADDR);
-        return false;
+        printf("Unable to read from EEPROM at address %x, using defaults\n", EEPROM_MOTOR_CONFIG_BASE_ADDR);
+        need_defaults = true;
+    } else if (eeprom_motor_data.motor_data_rev != EEPROM_MOTOR_DATA_REV) {
+        need_defaults = true;
     }
 
-    // If the revision doesn't match then re-initialize the config
-    if (eeprom_motor_data.motor_data_rev != EEPROM_MOTOR_DATA_REV) {
+    if (need_defaults) {
         memcpy(&eeprom_motor_data.motor_data[0], &default_motor_persistent_config, sizeof(motor_persistent_config_t));
         memcpy(&eeprom_motor_data.motor_data[1], &default_motor_persistent_config, sizeof(motor_persistent_config_t));
         eeprom_motor_data.motor_data_rev = EEPROM_MOTOR_DATA_REV;
@@ -344,11 +355,13 @@ bool motor_config_init(void) {
         // Fine Trickler (default 40:19)
         eeprom_motor_data.motor_data[1].gear_ratio = 2.1052631f;
 
-        // Write data back
-        is_ok = eeprom_write(EEPROM_MOTOR_CONFIG_BASE_ADDR, (uint8_t *) &eeprom_motor_data, sizeof(eeprom_motor_data_t));
-        if (!is_ok) {
+        // Default: motors enabled
+        eeprom_motor_data.motors_enabled = true;
+        eeprom_motor_data.motors_detected = false;
+
+        // Write data back (may fail if no EEPROM)
+        if (is_ok && !eeprom_write(EEPROM_MOTOR_CONFIG_BASE_ADDR, (uint8_t *) &eeprom_motor_data, sizeof(eeprom_motor_data_t))) {
             printf("Unable to write to %x\n", EEPROM_MOTOR_CONFIG_BASE_ADDR);
-            return false;
         }
     }
     
@@ -360,10 +373,13 @@ bool motor_config_init(void) {
     coarse_trickler_motor_config.step_direction = coarse_trickler_motor_config.persistent_config.inverted_direction ? true : false;
     fine_trickler_motor_config.step_direction = fine_trickler_motor_config.persistent_config.inverted_direction ? true : false;
 
+    // Copy motors_enabled from EEPROM
+    motors_enabled = eeprom_motor_data.motors_enabled;
+
     // Register to eeprom save all
     eeprom_register_handler(motor_config_save);
 
-    return is_ok;
+    return true;
 }
 
 
@@ -373,6 +389,8 @@ bool motor_config_save() {
 
     // Set the versionf 
     eeprom_motor_data.motor_data_rev = EEPROM_MOTOR_DATA_REV;
+    eeprom_motor_data.motors_enabled = motors_enabled;
+    eeprom_motor_data.motors_detected = motors_detected;
 
     // Copy the live data to the EEPROM structure
     memcpy(&eeprom_motor_data.motor_data[0], &coarse_trickler_motor_config.persistent_config, sizeof(motor_persistent_config_t));
@@ -392,14 +410,21 @@ void speed_ramp(motor_config_t * motor_config, float prev_speed, float new_speed
 
     // Calculate termination condition
     uint32_t ramp_time_us = (uint32_t) (fabs(ramp_time_s) * 1e6);
+    if (ramp_time_us == 0) {
+        // Speed delta too small for ramp, set final speed directly
+        uint32_t final_period = speed_to_period(new_speed, pio_speed, full_rotation_steps);
+        pio_sm_clear_fifos(motor_config->pio_config.pio, motor_config->pio_config.sm);
+        pio_sm_put_blocking(motor_config->pio_config.pio, motor_config->pio_config.sm, final_period);
+        return;
+    }
     uint32_t start_time = time_us_32();
-    uint32_t stop_time = start_time + ramp_time_us;
 
     float current_speed;
     uint32_t current_period;
     while (true) {
         uint32_t current_time = time_us_32();
-        if (current_time > stop_time) {
+        uint32_t elapsed = current_time - start_time;  // handles wraparound correctly
+        if (elapsed >= ramp_time_us) {
             break;
         }
 
@@ -463,15 +488,33 @@ void stepper_speed_control_task(void * p) {
 
 
 void motor_set_speed(motor_select_t selected_motor, float new_velocity) {
+    // Use xQueueOverwrite to always set the latest speed without blocking.
+    // The queue depth is 2, but we want the PID loop to never stall waiting
+    // for the motor task to consume a previous command.
+    const TickType_t timeout = 0;
+
     if (selected_motor == SELECT_COARSE_TRICKLER_MOTOR || selected_motor == SELECT_BOTH_MOTOR) {
         if (coarse_trickler_motor_config.stepper_speed_control_queue) {
-            xQueueSend(coarse_trickler_motor_config.stepper_speed_control_queue, &new_velocity, portMAX_DELAY);
+            if (xQueueSend(coarse_trickler_motor_config.stepper_speed_control_queue, &new_velocity, timeout) != pdPASS) {
+                // Queue full — force overwrite by removing old item and resending
+                float discard;
+                xQueueReceive(coarse_trickler_motor_config.stepper_speed_control_queue, &discard, 0);
+                if (xQueueSend(coarse_trickler_motor_config.stepper_speed_control_queue, &new_velocity, 0) != pdPASS) {
+                    printf("WARN: Motor speed command lost!\n");
+                }
+            }
         }
     }
 
     if (selected_motor == SELECT_FINE_TRICKLER_MOTOR || selected_motor == SELECT_BOTH_MOTOR) {
         if (fine_trickler_motor_config.stepper_speed_control_queue) {
-            xQueueSend(fine_trickler_motor_config.stepper_speed_control_queue, &new_velocity, portMAX_DELAY);
+            if (xQueueSend(fine_trickler_motor_config.stepper_speed_control_queue, &new_velocity, timeout) != pdPASS) {
+                float discard;
+                xQueueReceive(fine_trickler_motor_config.stepper_speed_control_queue, &discard, 0);
+                if (xQueueSend(fine_trickler_motor_config.stepper_speed_control_queue, &new_velocity, 0) != pdPASS) {
+                    printf("WARN: Motor speed command lost!\n");
+                }
+            }
         }
     }
 }
@@ -485,7 +528,7 @@ void motor_enable(motor_select_t selected_motor, bool enable) {
 
         // If disabled, we shall also disable the stepper signal
         if (!enable) {
-            motor_set_speed(selected_motor, 0);
+            motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
         }
     }
 
@@ -496,7 +539,7 @@ void motor_enable(motor_select_t selected_motor, bool enable) {
 
         // If disabled, we shall also disable the stepper signal
         if (!enable) {
-            motor_set_speed(selected_motor, 0);
+            motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
         }
     }
 }
@@ -514,7 +557,8 @@ uint16_t get_motor_max_speed(motor_select_t selected_motor) {
         break;
     
     default:
-        assert(false);
+        printf("ERROR: Invalid motor selection %d in get_motor_max_speed\n", selected_motor);
+        report_error(ERR_MOTOR_INVALID_SELECT);
         break;
     }
 
@@ -556,6 +600,11 @@ motor_init_err_t motors_init(void) {
     is_ok = motor_config_init();
     if (!is_ok) {
         return MOTOR_INIT_CFG_ERR;
+    }
+
+    // Check if motors are disabled by user setting
+    if (!motors_enabled) {
+        return MOTOR_INIT_DISABLED;
     }
 
     // Assume the `motor_config_init` is already called
@@ -605,8 +654,8 @@ motor_init_err_t motors_init(void) {
     }
 
     // Initialize motor related RTOS control
-    coarse_trickler_motor_config.stepper_speed_control_queue = xQueueCreate(2, sizeof(stepper_speed_control_t));
-    fine_trickler_motor_config.stepper_speed_control_queue = xQueueCreate(2, sizeof(stepper_speed_control_t));
+    coarse_trickler_motor_config.stepper_speed_control_queue = xQueueCreate(2, sizeof(float));
+    fine_trickler_motor_config.stepper_speed_control_queue = xQueueCreate(2, sizeof(float));
 
     // Create one task for each stepper controller
     xTaskCreate(stepper_speed_control_task, 
@@ -623,6 +672,9 @@ motor_init_err_t motors_init(void) {
                 8, 
                 &fine_trickler_motor_config.stepper_speed_control_task_handler);
 
+    // Motors successfully initialized
+    motors_detected = true;
+
     return MOTOR_INIT_OK;
 }
 
@@ -638,9 +690,10 @@ const char * get_motor_select_string(motor_select_t selected_motor) {
         return "Both";
     }
 
-    assert(false);
+    printf("ERROR: Invalid motor selection %d in get_motor_select_string\n", selected_motor);
+    report_error(ERR_MOTOR_INVALID_SELECT);
 
-    return NULL;
+    return "Unknown";
 }
 
 
@@ -676,7 +729,7 @@ void handle_motor_init_error(motor_init_err_t err) {
         // Flash LED
         for (int i = 0; i < err; i++) {
             // Set neopixel LED colour
-            _neopixel_led_set_colour(0xFFA500, 0xFFA5000, 0xffffff);
+            _neopixel_led_set_colour(0xFFA500, 0xFFA500, 0xffffff);
             delay_ms(200, scheduler_state);
             _neopixel_led_set_colour(0xFF0000, 0xFF0000, 0xffffff);
             delay_ms(200, scheduler_state);
@@ -819,5 +872,78 @@ bool http_rest_fine_motor_config(struct fs_file *file, int num_params, char *par
     file->index = response_len;
     file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
 
+    return true;
+}
+
+
+// Task to initialize motors after scheduler starts (so blocking doesn't kill WiFi)
+void motor_init_task(void *p) {
+    (void)p;
+    
+    printf("Motor init task starting...\n");
+    
+    motor_init_err_t err = motors_init();
+    
+    if (err == MOTOR_INIT_OK) {
+        printf("Motors initialized successfully\n");
+    } else if (err == MOTOR_INIT_DISABLED) {
+        printf("Motors disabled by user\n");
+    } else {
+        printf("Motor init error: %d\n", err);
+        // Report error based on type
+        switch (err) {
+            case MOTOR_INIT_CFG_ERR:
+                report_error(ERR_MOTOR_UART_INIT);
+                break;
+            case MOTOR_INIT_COARSE_DRV_ERR:
+                report_error(ERR_MOTOR_COARSE_INIT);
+                break;
+            case MOTOR_INIT_FINE_DRV_ERR:
+                report_error(ERR_MOTOR_FINE_INIT);
+                break;
+            default:
+                report_error(ERR_MOTOR_UART_INIT);
+                break;
+        }
+    }
+    
+    // Task complete, delete self
+    vTaskDelete(NULL);
+}
+
+
+// Set motors enabled/disabled and save to EEPROM
+void motors_set_enabled(bool enabled) {
+    motors_enabled = enabled;
+    motor_config_save();
+    printf("Motors %s (reboot required)\n", enabled ? "enabled" : "disabled");
+}
+
+
+// REST endpoint for motors state
+bool http_rest_motors_state(struct fs_file *file, int num_params, char *params[], char *values[]) {
+    static char json_buffer[256];
+    
+    // Check for enable parameter
+    for (int idx = 0; idx < num_params; idx++) {
+        if (strcmp(params[idx], "enable") == 0) {
+            bool enable = string_to_boolean(values[idx]);
+            motors_set_enabled(enable);
+        }
+    }
+    
+    // Build response
+    snprintf(json_buffer, sizeof(json_buffer),
+             "%s{\"motors_enabled\":%s,\"motors_detected\":%s}",
+             http_json_header,
+             boolean_to_string(motors_enabled),
+             boolean_to_string(motors_detected));
+    
+    size_t response_len = strlen(json_buffer);
+    file->data = json_buffer;
+    file->len = response_len;
+    file->index = response_len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
+    
     return true;
 }

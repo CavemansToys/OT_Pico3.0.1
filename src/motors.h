@@ -8,7 +8,7 @@
 #include "common.h"
 #include "http_rest.h"
 
-#define EEPROM_MOTOR_DATA_REV                     5              // 16 byte 
+#define EEPROM_MOTOR_DATA_REV                     6              // Bumped for motors_enabled flag
 
 
 // Terms
@@ -24,6 +24,7 @@ typedef enum {
 
 typedef enum {
     MOTOR_INIT_OK = 0,
+    MOTOR_INIT_DISABLED = 1,
     MOTOR_INIT_CFG_ERR = 2,
     MOTOR_INIT_COARSE_DRV_ERR = 3,
     MOTOR_INIT_FINE_DRV_ERR = 4,
@@ -48,6 +49,8 @@ typedef struct {
 
 typedef struct {
     uint32_t motor_data_rev;
+    bool motors_enabled;           // User setting: enable/disable motors
+    bool motors_detected;          // Runtime: were motors actually found
     motor_persistent_config_t motor_data[2];
 } eeprom_motor_data_t;
 
@@ -76,6 +79,10 @@ typedef struct {
 } motor_config_t;
 
 
+// Global motor state
+extern bool motors_enabled;
+extern bool motors_detected;
+
 
 // Interface functions
 #ifdef __cplusplus
@@ -85,17 +92,18 @@ extern "C" {
 motor_init_err_t motors_init(void);
 bool motor_config_init(void);
 bool motor_config_save(void);
-void motor_task(void *p);
+void motor_init_task(void *p);
 void motor_set_speed(motor_select_t selected_motor, float new_velocity);
 uint16_t get_motor_max_speed(motor_select_t selected_motor);
 float get_motor_min_speed(motor_select_t selected_motor);
 void motor_enable(motor_select_t selected_motor, bool enable);
 const char * get_motor_select_string(motor_select_t selected_motor);
-void handle_motor_init_error(motor_init_err_t err);
+void motors_set_enabled(bool enabled);
 
 // REST interface
 bool http_rest_coarse_motor_config(struct fs_file *file, int num_params, char *params[], char *values[]);
 bool http_rest_fine_motor_config(struct fs_file *file, int num_params, char *params[], char *values[]);
+bool http_rest_motors_state(struct fs_file *file, int num_params, char *params[], char *values[]);
 
 
 #ifdef __cplusplus

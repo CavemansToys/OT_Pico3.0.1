@@ -12,7 +12,9 @@ ButtonEncoderEvent_t button_wait_for_input(bool block) {
     TickType_t delay_ticks;
 
     if (block) {
-        delay_ticks = portMAX_DELAY;
+        // Use bounded timeout (4s) instead of portMAX_DELAY so callers
+        // like menu_task can feed the hardware watchdog (8.3s timeout)
+        delay_ticks = pdMS_TO_TICKS(4000);
     }
     else {
         delay_ticks = 0;
