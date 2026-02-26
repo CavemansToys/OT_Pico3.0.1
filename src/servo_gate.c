@@ -99,6 +99,10 @@ void servo_gate_control_task(void * p) {
             case GATE_CLOSE:
                 new_open_ratio = 1.0f;
                 break;
+            case GATE_DISABLED:
+                // Open the gate then disable - allows powder flow without servo control
+                new_open_ratio = 0.0f;
+                break;
             default:
                 // Invalid state - skip processing
                 continue;
