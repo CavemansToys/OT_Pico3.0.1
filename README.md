@@ -2,7 +2,7 @@
 
 Firmware for the [OpenTrickler](https://github.com/eamars/OpenTrickler-RP2040-Controller) automated powder trickler, used in precision ammunition reloading. Runs on a **Raspberry Pi Pico 2 W (RP2350)** with FreeRTOS SMP, WiFi, and multiple hardware peripherals.
 
-Developed by [Gadgets](https://www.cavemanstoys.com) — www.cavemanstoys.com
+Developed by Gadgets — [www.cavemanstoys.com](https://www.cavemanstoys.com)
 
 Based on [OpenTrickler-RP2040-Controller](https://github.com/eamars/OpenTrickler-RP2040-Controller).
 
