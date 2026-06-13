@@ -6,8 +6,6 @@ Developed by Gadgets — [www.cavemanstoys.com](https://www.cavemanstoys.com)
 
 Based on [OpenTrickler-RP2040-Controller](https://github.com/eamars/OpenTrickler-RP2040-Controller).
 
-![OpenTrickler Web Portal](SShot.jpg)
-
 ## Supported Hardware
 
 | Board | SoC | Build Flag |
@@ -17,21 +15,11 @@ Based on [OpenTrickler-RP2040-Controller](https://github.com/eamars/OpenTrickler
 
 ## Features
 
-- Dual Trinamic TMC2209 stepper motor control (coarse + fine)
-- PID-controlled powder dispensing with coarse/fine/pulse modes
-- Coarse tube reverse with configurable settle time
+- Coarse tube reverse with configurable settle time --- I dont see this helping, but its there to try.
 - AI-assisted PID auto-tuning
-- Multiple scale driver support (AND, GNG, generic, USSOLID, Steinberg)
-- Simulation mode for testing without hardware
+- Simulation mode for testing without teh Scale or powder.
 - PWM servo powder gate
 - WiFi access point + station mode with web portal
-- REST API for full remote control
-- Mini 12864 or TFT35/TFT43 color display (LVGL)
-- Rotary encoder + button input
-- WS2812 NeoPixel status LED
-- CAT24C256 EEPROM persistent storage with CRC validation
-- Powder profile management with import/export
-- Powder cleanup/dump mode
 
 ## Prerequisites
 
