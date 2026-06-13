@@ -17,7 +17,7 @@ Based on [OpenTrickler-RP2040-Controller](https://github.com/eamars/OpenTrickler
 
 - Coarse tube reverse with configurable settle time --- I dont see this helping, but its there to try.
 - AI-assisted PID auto-tuning
-- Simulation mode for testing without teh Scale or powder.
+- Simulation mode for testing without the Scale or powder.
 - PWM servo powder gate
 - WiFi access point + station mode with web portal
 
