@@ -8,6 +8,13 @@ Based on [OpenTrickler-RP2040-Controller](https://github.com/eamars/OpenTrickler
 
 ![OpenTrickler Web Portal](SShot.jpg)
 
+## Supported Hardware
+
+| Board | SoC | Build Flag |
+|---|---|---|
+| Raspberry Pi Pico 2 W | RP2350 (default) | _(none)_ |
+| Raspberry Pi Pico W | RP2040 | `-DPICO_BOARD=pico_w` |
+
 ## Features
 
 - Dual Trinamic TMC2209 stepper motor control (coarse + fine)
