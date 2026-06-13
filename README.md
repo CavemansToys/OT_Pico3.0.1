@@ -8,10 +8,10 @@ Based on [OpenTrickler-RP2040-Controller](https://github.com/eamars/OpenTrickler
 
 ## Supported Hardware
 
-| Board | SoC | Build Flag |
+| Board | SoC 
 |---|---|---|
-| Raspberry Pi Pico 2 W | RP2350 (default) | _(none)_ |
-| Raspberry Pi Pico W | RP2040 | `-DPICO_BOARD=pico_w` |
+| Raspberry Pi Pico 2 W | RP2350 - Tested
+| Raspberry Pi Pico W | RP2040 
 
 ## Features
 
