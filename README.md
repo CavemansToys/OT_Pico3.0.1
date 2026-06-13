@@ -43,21 +43,6 @@ mkdir build && cd build
 cmake -G Ninja ..
 ninja
 
-# Build with TFT35 color display
-cmake -G Ninja -DUSE_TFT35=ON ..
-ninja
-
-# Build with TFT43 color display
-cmake -G Ninja -DUSE_TFT43=ON ..
-ninja
-```
-
-> **Note:** TFT35/TFT43 builds require the LVGL library. Add it as a submodule:
-> ```bash
-> git submodule add https://github.com/lvgl/lvgl.git library/lvgl
-> cd library/lvgl && git checkout v9.2.0 && cd ../..
-> ```
-
 ## Flashing
 
 1. Hold **BOOTSEL** while plugging the Pico into USB
