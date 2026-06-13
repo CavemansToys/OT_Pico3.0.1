@@ -145,9 +145,6 @@ uint8_t cleanup_mode_menu() {
                 break;
             case BUTTON_ENCODER_ROTATE_CCW:
                 cleanup_mode_config.trickler_speed -= 1;
-                if (cleanup_mode_config.trickler_speed < 0.0f) {
-                    cleanup_mode_config.trickler_speed = 0.0f;
-                }
                 motor_set_speed(SELECT_BOTH_MOTOR, cleanup_mode_config.trickler_speed);
                 break;
 
@@ -209,7 +206,7 @@ bool http_rest_cleanup_mode_state(struct fs_file *file, int num_params, char *pa
             cleanup_mode_config.cleanup_mode_state = new_state;
         }
         else if (strcmp(params[idx], "s1") == 0) {
-            cleanup_mode_config.trickler_speed = strtof(values[idx], NULL);
+            cleanup_mode_config.trickler_speed = strtof_locale(values[idx]);
             motor_set_speed(SELECT_BOTH_MOTOR, cleanup_mode_config.trickler_speed);
         }
     }

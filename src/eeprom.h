@@ -12,7 +12,7 @@
 // 2K-3K: Reserved for future use
 #define EEPROM_MOTOR_CONFIG_BASE_ADDR           (4 * 1024)     // 4K  - Motor settings
 #define EEPROM_CHARGE_MODE_BASE_ADDR            (5 * 1024)     // 5K  - Charge mode settings
-#define EEPROM_APP_CONFIG_BASE_ADDR             (6 * 1024)     // 6K  - App settings
+#define EEPROM_APP_CONFIG_BASE_ADDR             (6 * 1024)     // 6K  - WiFi settings
 #define EEPROM_NEOPIXEL_LED_CONFIG_BASE_ADDR    (7 * 1024)     // 7K  - Neopixel LED settings
 #define EEPROM_MINI_12864_CONFIG_BASE_ADDR      (8 * 1024)     // 8K  - Mini 12864 display
 #define EEPROM_PROFILE_DATA_BASE_ADDR           (9 * 1024)     // 9K  - Powder profiles

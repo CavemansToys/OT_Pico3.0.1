@@ -80,3 +80,16 @@ _deps
 
 # Build directory
 build*/
+
+# Windows junk
+desktop.ini
+Thumbs.db
+
+# Agent memory
+AGENTS.md
+
+# Generated files
+src/generated/
+
+# Legacy files
+*.legacy

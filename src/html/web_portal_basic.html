@@ -146,7 +146,7 @@
         function saveWifi(reboot) {
             const form = document.getElementById('wifiForm');
             const params = new URLSearchParams(new FormData(form));
-            if (reboot) params.append('save', 'true');
+            if (reboot) params.append('ee', 'true');
             fetch('/rest/wireless_config?' + params.toString())
             .then(r => r.json())
             .then(() => {
@@ -226,5 +226,10 @@
         loadDisplayConfig();
         refreshErrors();
     </script>
+
+<div class="text-center py-8 text-base opacity-70">
+  developed from <a href="https://github.com/eamars/OpenTrickler-RP2040-Controller" class="link link-hover" target="_blank">https://github.com/eamars/OpenTrickler-RP2040-Controller</a>
+</div>
+
 </body>
 </html>

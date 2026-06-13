@@ -97,6 +97,7 @@ void motor_set_speed(motor_select_t selected_motor, float new_velocity);
 uint16_t get_motor_max_speed(motor_select_t selected_motor);
 float get_motor_min_speed(motor_select_t selected_motor);
 void motor_enable(motor_select_t selected_motor, bool enable);
+void motor_tap(motor_select_t motor, float speed, uint32_t duration_ms);
 const char * get_motor_select_string(motor_select_t selected_motor);
 void motors_set_enabled(bool enabled);
 
@@ -104,6 +105,7 @@ void motors_set_enabled(bool enabled);
 bool http_rest_coarse_motor_config(struct fs_file *file, int num_params, char *params[], char *values[]);
 bool http_rest_fine_motor_config(struct fs_file *file, int num_params, char *params[], char *values[]);
 bool http_rest_motors_state(struct fs_file *file, int num_params, char *params[], char *values[]);
+bool http_rest_motor_tap(struct fs_file *file, int num_params, char *params[], char *values[]);
 
 
 #ifdef __cplusplus

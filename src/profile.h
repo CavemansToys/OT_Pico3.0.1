@@ -63,6 +63,10 @@ void profile_set_pid_params(float coarse_kp, float coarse_kd, float fine_kp, flo
 // REST interface
 bool http_rest_profile_config(struct fs_file *file, int num_params, char *params[], char *values[]);
 bool http_rest_profile_summary(struct fs_file *file, int num_params, char *params[], char *values[]);
+bool http_rest_profile_reset(struct fs_file *file, int num_params, char *params[], char *values[]);
+
+bool profile_reset_defaults(void);
+bool profile_reset_one(uint8_t idx);
 
 
 #ifdef __cplusplus

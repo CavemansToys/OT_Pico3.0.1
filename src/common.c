@@ -2,6 +2,7 @@
 #include <task.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "common.h"
 #include "pico/time.h"
@@ -82,6 +83,15 @@ bool string_to_boolean(char * s) {
     }
 
     return var;
+}
+
+float strtof_locale(char * s) {
+    for (char * p = s; *p; p++) {
+        if (*p == ',') {
+            *p = '.';
+        }
+    }
+    return strtof(s, NULL);
 }
 
 

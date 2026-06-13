@@ -23,17 +23,17 @@ const profile_t default_ar_2208_profile = {
 
     .name = "AR2208,gr",
 
-    .coarse_kp = 0.025f,
+    .coarse_kp = 1.0f,
     .coarse_ki = 0.0f,
-    .coarse_kd = 0.25f,
+    .coarse_kd = 2.0f,
     .coarse_min_flow_speed_rps = 0.1f,
     .coarse_max_flow_speed_rps = 5.0f,
 
-    .fine_kp = 2.0f,
+    .fine_kp = 5.0f,
     .fine_ki = 0.0f,
-    .fine_kd = 10.0f,
+    .fine_kd = 20.0f,
     .fine_min_flow_speed_rps = 0.1f,
-    .fine_max_flow_speed_rps = 3.0f,
+    .fine_max_flow_speed_rps = 5.0f,
 };
 
 
@@ -43,15 +43,15 @@ const profile_t default_ar_2209_profile = {
 
     .name = "AR2209,gr",
 
-    .coarse_kp = 0.02f,
+    .coarse_kp = 1.0f,
     .coarse_ki = 0.0f,
-    .coarse_kd = 0.30f,
+    .coarse_kd = 2.0f,
     .coarse_min_flow_speed_rps = 0.1f,
     .coarse_max_flow_speed_rps = 5.0f,
 
-    .fine_kp = 2.0f,
+    .fine_kp = 5.0f,
     .fine_ki = 0.0f,
-    .fine_kd = 10.0f,
+    .fine_kd = 20.0f,
 
     .fine_min_flow_speed_rps = 0.08f,
     .fine_max_flow_speed_rps = 5.0f,
@@ -64,15 +64,15 @@ const profile_t default_8208xbr_profile = {
 
     .name = "8208XBR,gr",
 
-    .coarse_kp = 0.05f,
+    .coarse_kp = 1.0f,
     .coarse_ki = 0.0f,
-    .coarse_kd = 0.3f,
+    .coarse_kd = 2.0f,
     .coarse_min_flow_speed_rps = 0.1f,
     .coarse_max_flow_speed_rps = 5.0f,
 
-    .fine_kp = 2.0f,
+    .fine_kp = 5.0f,
     .fine_ki = 0.0f,
-    .fine_kd = 12.0f,
+    .fine_kd = 20.0f,
 
     .fine_min_flow_speed_rps = 0.06f,
     .fine_max_flow_speed_rps = 5.0f,
@@ -85,17 +85,37 @@ const profile_t default_benchmark2_profile = {
 
     .name = "Benchmark2,gr",
 
-    .coarse_kp = 0.06f,
+    .coarse_kp = 1.0f,
     .coarse_ki = 0.0f,
-    .coarse_kd = 0.3f,
+    .coarse_kd = 2.0f,
     .coarse_min_flow_speed_rps = 0.1f,
     .coarse_max_flow_speed_rps = 5.0f,
 
-    .fine_kp = 0.8f,
+    .fine_kp = 5.0f,
     .fine_ki = 0.0f,
-    .fine_kd = 15.0f,
+    .fine_kd = 20.0f,
 
     .fine_min_flow_speed_rps = 0.08f,
+    .fine_max_flow_speed_rps = 5.0f,
+};
+
+
+static const profile_t default_generic_profile = {
+    .rev = 0,
+    .compatibility = 0,
+
+    .name = "NewProfile",
+
+    .coarse_kp = 1.0f,
+    .coarse_ki = 0.0f,
+    .coarse_kd = 2.0f,
+    .coarse_min_flow_speed_rps = 0.1f,
+    .coarse_max_flow_speed_rps = 5.0f,
+
+    .fine_kp = 5.0f,
+    .fine_ki = 0.0f,
+    .fine_kd = 20.0f,
+    .fine_min_flow_speed_rps = 0.1f,
     .fine_max_flow_speed_rps = 5.0f,
 };
 
@@ -166,10 +186,8 @@ bool profile_data_init() {
 
         // Update remaining profile slots with default names
         for (uint8_t idx=4; idx < MAX_PROFILE_CNT; idx+=1) {
-            profile_t * selected_profile = &profile_data.profiles[idx];
-
-            // Provide default name
-            snprintf(selected_profile->name, PROFILE_NAME_MAX_LEN,
+            memcpy(&profile_data.profiles[idx], &default_generic_profile, sizeof(profile_t));
+            snprintf(profile_data.profiles[idx].name, PROFILE_NAME_MAX_LEN,
                      "NewProfile%d", idx);
         }
 
@@ -320,38 +338,38 @@ bool http_rest_profile_config(struct fs_file *file, int num_params, char *params
                 current_profile->name[sizeof(current_profile->name) - 1] = '\0';
             }
             else if (strcmp(params[idx], "p3") == 0) {
-                new_coarse_kp = strtof(values[idx], NULL);
+                new_coarse_kp = strtof_locale(values[idx]);
                 pid_changed = true;
             }
             else if (strcmp(params[idx], "p4") == 0) {
-                current_profile->coarse_ki = strtof(values[idx], NULL);
+                current_profile->coarse_ki = strtof_locale(values[idx]);
             }
             else if (strcmp(params[idx], "p5") == 0) {
-                new_coarse_kd = strtof(values[idx], NULL);
+                new_coarse_kd = strtof_locale(values[idx]);
                 pid_changed = true;
             }
             else if (strcmp(params[idx], "p6") == 0) {
-                current_profile->coarse_min_flow_speed_rps = strtof(values[idx], NULL);
+                current_profile->coarse_min_flow_speed_rps = strtof_locale(values[idx]);
             }
             else if (strcmp(params[idx], "p7") == 0) {
-                current_profile->coarse_max_flow_speed_rps = strtof(values[idx], NULL);
+                current_profile->coarse_max_flow_speed_rps = strtof_locale(values[idx]);
             }
             else if (strcmp(params[idx], "p8") == 0) {
-                new_fine_kp = strtof(values[idx], NULL);
+                new_fine_kp = strtof_locale(values[idx]);
                 pid_changed = true;
             }
             else if (strcmp(params[idx], "p9") == 0) {
-                current_profile->fine_ki = strtof(values[idx], NULL);
+                current_profile->fine_ki = strtof_locale(values[idx]);
             }
             else if (strcmp(params[idx], "p10") == 0) {
-                new_fine_kd = strtof(values[idx], NULL);
+                new_fine_kd = strtof_locale(values[idx]);
                 pid_changed = true;
             }
             else if (strcmp(params[idx], "p11") == 0) {
-                current_profile->fine_min_flow_speed_rps = strtof(values[idx], NULL);
+                current_profile->fine_min_flow_speed_rps = strtof_locale(values[idx]);
             }
             else if (strcmp(params[idx], "p12") == 0) {
-                current_profile->fine_max_flow_speed_rps = strtof(values[idx], NULL);
+                current_profile->fine_max_flow_speed_rps = strtof_locale(values[idx]);
             }
             else if (strcmp(params[idx], "ee") == 0) {
                 save_to_eeprom = string_to_boolean(values[idx]);
@@ -393,6 +411,72 @@ bool http_rest_profile_config(struct fs_file *file, int num_params, char *params
     file->data = buf;
     file->len = response_len;
     file->index = response_len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
+
+    return true;
+}
+
+
+bool profile_reset_defaults(void) {
+    memset(profile_data.profiles, 0x0, sizeof(profile_data.profiles));
+
+    memcpy(&profile_data.profiles[0], &default_ar_2208_profile, sizeof(profile_t));
+    memcpy(&profile_data.profiles[1], &default_ar_2209_profile, sizeof(profile_t));
+    memcpy(&profile_data.profiles[2], &default_8208xbr_profile, sizeof(profile_t));
+    memcpy(&profile_data.profiles[3], &default_benchmark2_profile, sizeof(profile_t));
+
+    for (uint8_t idx = 4; idx < MAX_PROFILE_CNT; idx += 1) {
+        memcpy(&profile_data.profiles[idx], &default_generic_profile, sizeof(profile_t));
+        snprintf(profile_data.profiles[idx].name, PROFILE_NAME_MAX_LEN,
+                 "NewProfile%d", idx);
+    }
+
+    profile_data.current_profile_idx = 0;
+    return profile_data_save();
+}
+
+
+bool profile_reset_one(uint8_t idx) {
+    if (idx >= MAX_PROFILE_CNT) return false;
+
+    memcpy(&profile_data.profiles[idx], &default_generic_profile, sizeof(profile_t));
+    snprintf(profile_data.profiles[idx].name, PROFILE_NAME_MAX_LEN, "NewProfile%d", idx);
+
+    printf("Profile reset #%d: name=%s, coarse_kp=%.3f, fine_kp=%.3f\n",
+           idx, profile_data.profiles[idx].name,
+           profile_data.profiles[idx].coarse_kp,
+           profile_data.profiles[idx].fine_kp);
+
+    return profile_data_save();
+}
+
+
+bool http_rest_profile_reset(struct fs_file *file, int num_params, char *params[], char *values[]) {
+    static char buf[128];
+    bool success;
+
+    int target_idx = -1;
+    for (int idx = 0; idx < num_params; idx += 1) {
+        if (strcmp(params[idx], "pf") == 0) {
+            target_idx = atoi(values[idx]);
+        }
+    }
+
+    if (target_idx >= 0 && target_idx < MAX_PROFILE_CNT) {
+        success = profile_reset_one((uint8_t) target_idx);
+    } else {
+        success = profile_reset_defaults();
+    }
+
+    snprintf(buf, sizeof(buf),
+             "%s{\"success\":%s}",
+             http_json_header,
+             success ? "true" : "false");
+
+    size_t len = strlen(buf);
+    file->data = buf;
+    file->len = len;
+    file->index = len;
     file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
 
     return true;

@@ -308,22 +308,22 @@ bool http_rest_servo_gate_config(struct fs_file *file, int num_params, char *par
             servo_gate.eeprom_servo_gate_config.servo_gate_enable = enable;
         }
         else if (strcmp(params[idx], "c1") == 0) {
-            servo_gate.eeprom_servo_gate_config.shutter0_close_duty_cycle = strtof(values[idx], NULL);;
+            servo_gate.eeprom_servo_gate_config.shutter0_close_duty_cycle = strtof_locale(values[idx]);
         }
         else if (strcmp(params[idx], "c2") == 0) {
-            servo_gate.eeprom_servo_gate_config.shutter0_open_duty_cycle = strtof(values[idx], NULL);;
+            servo_gate.eeprom_servo_gate_config.shutter0_open_duty_cycle = strtof_locale(values[idx]);
         }
         else if (strcmp(params[idx], "c3") == 0) {
-            servo_gate.eeprom_servo_gate_config.shutter1_close_duty_cycle = strtof(values[idx], NULL);;
+            servo_gate.eeprom_servo_gate_config.shutter1_close_duty_cycle = strtof_locale(values[idx]);
         }
         else if (strcmp(params[idx], "c4") == 0) {
-            servo_gate.eeprom_servo_gate_config.shutter1_open_duty_cycle = strtof(values[idx], NULL);;
+            servo_gate.eeprom_servo_gate_config.shutter1_open_duty_cycle = strtof_locale(values[idx]);
         }
         else if (strcmp(params[idx], "c5") == 0) {
-            servo_gate.eeprom_servo_gate_config.shutter_close_speed_pct_s = strtof(values[idx], NULL);;
+            servo_gate.eeprom_servo_gate_config.shutter_close_speed_pct_s = strtof_locale(values[idx]);
         }
         else if (strcmp(params[idx], "c6") == 0) {
-            servo_gate.eeprom_servo_gate_config.shutter_open_speed_pct_s = strtof(values[idx], NULL);;
+            servo_gate.eeprom_servo_gate_config.shutter_open_speed_pct_s = strtof_locale(values[idx]);
         }
         else if (strcmp(params[idx], "ee") == 0) {
             save_to_eeprom = string_to_boolean(values[idx]);

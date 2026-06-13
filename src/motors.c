@@ -4,6 +4,7 @@
 #include <math.h>
 #include <FreeRTOS.h>
 #include <queue.h>
+#include <timers.h>
 #include <math.h>
 #include "app.h"
 #include "tmc2209.h"
@@ -20,6 +21,7 @@
 #include "display.h"  // in case the stepper motor driver failed to initialize
 #include "neopixel_led.h" // in case the stepper motor driver failed to initialize
 #include "error.h"
+#include "charge_mode.h"
 
 #define STEPPER_LOW_CYCLE_COUNT 13  // Defined as the implementation of stepper.pio
 #define MAX_RESPONSE_TIME   0.01f   // Maximum response time for PIO stepper
@@ -794,7 +796,7 @@ void apply_rest_motor_config(motor_config_t * motor_config, int num_params, char
 
     for (int idx = 0; idx < num_params; idx += 1) {
         if (strcmp(params[idx], "m0") == 0) {
-            float angular_acceleration = strtof(values[idx], NULL);
+            float angular_acceleration = strtof_locale(values[idx]);
             motor_config->persistent_config.angular_acceleration = angular_acceleration;
         }
         else if (strcmp(params[idx], "m1") == 0) {
@@ -818,11 +820,11 @@ void apply_rest_motor_config(motor_config_t * motor_config, int num_params, char
             motor_config->persistent_config.r_sense = r_sense;
         }
         else if (strcmp(params[idx], "m6") == 0) {
-            float min_speed_rps = strtof(values[idx], NULL);
+            float min_speed_rps = strtof_locale(values[idx]);
             motor_config->persistent_config.min_speed_rps = min_speed_rps;
         }
         else if (strcmp(params[idx], "m7") == 0) {
-            float gear_ratio = strtof(values[idx], NULL);
+            float gear_ratio = strtof_locale(values[idx]);
             motor_config->persistent_config.gear_ratio = gear_ratio;
         }
         else if (strcmp(params[idx], "m8") == 0) {
@@ -920,6 +922,49 @@ void motors_set_enabled(bool enabled) {
 }
 
 
+// --- Motor tap (single pulse) ---
+static motor_select_t tap_motor_selection;
+static TimerHandle_t tap_timer = NULL;
+static bool tap_was_coarse_enabled = false;
+static bool tap_was_fine_enabled = false;
+
+static bool is_motor_hw_enabled(motor_config_t *config) {
+    bool pin_state = gpio_get(config->en_pin);
+    return config->persistent_config.inverted_enable ? pin_state : !pin_state;
+}
+
+static void motor_tap_timer_callback(TimerHandle_t timer) {
+    motor_set_speed(tap_motor_selection, 0.0f);
+    if (!tap_was_coarse_enabled && (tap_motor_selection == SELECT_COARSE_TRICKLER_MOTOR || tap_motor_selection == SELECT_BOTH_MOTOR)) {
+        motor_enable(SELECT_COARSE_TRICKLER_MOTOR, false);
+    }
+    if (!tap_was_fine_enabled && (tap_motor_selection == SELECT_FINE_TRICKLER_MOTOR || tap_motor_selection == SELECT_BOTH_MOTOR)) {
+        motor_enable(SELECT_FINE_TRICKLER_MOTOR, false);
+    }
+}
+
+void motor_tap(motor_select_t motor, float speed, uint32_t duration_ms) {
+    // Save current enable state so we can restore it after the pulse
+    tap_was_coarse_enabled = is_motor_hw_enabled(&coarse_trickler_motor_config);
+    tap_was_fine_enabled = is_motor_hw_enabled(&fine_trickler_motor_config);
+
+    // Enable motor if it isn't already
+    if (!tap_was_coarse_enabled && (motor == SELECT_COARSE_TRICKLER_MOTOR || motor == SELECT_BOTH_MOTOR)) {
+        motor_enable(SELECT_COARSE_TRICKLER_MOTOR, true);
+    }
+    if (!tap_was_fine_enabled && (motor == SELECT_FINE_TRICKLER_MOTOR || motor == SELECT_BOTH_MOTOR)) {
+        motor_enable(SELECT_FINE_TRICKLER_MOTOR, true);
+    }
+
+    motor_set_speed(motor, speed);
+    tap_motor_selection = motor;
+    if (tap_timer == NULL) {
+        tap_timer = xTimerCreate("TapTmr", pdMS_TO_TICKS(1), pdFALSE, NULL, motor_tap_timer_callback);
+    }
+    xTimerChangePeriod(tap_timer, pdMS_TO_TICKS(duration_ms), 0);
+}
+
+
 // REST endpoint for motors state
 bool http_rest_motors_state(struct fs_file *file, int num_params, char *params[], char *values[]) {
     static char json_buffer[256];
@@ -945,5 +990,43 @@ bool http_rest_motors_state(struct fs_file *file, int num_params, char *params[]
     file->index = response_len;
     file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
     
+    return true;
+}
+
+
+bool http_rest_motor_tap(struct fs_file *file, int num_params, char *params[], char *values[]) {
+    static char json_buffer[128];
+
+    extern charge_mode_config_t charge_mode_config;
+
+    motor_select_t motor = SELECT_FINE_TRICKLER_MOTOR;
+    float speed = fmaxf(get_motor_min_speed(SELECT_FINE_TRICKLER_MOTOR),
+                        get_motor_max_speed(SELECT_FINE_TRICKLER_MOTOR) * 0.3f);
+    uint32_t duration_ms = charge_mode_config.eeprom_charge_mode_data.pulse_duration_ms;
+
+    for (int idx = 0; idx < num_params; idx++) {
+        if (strcmp(params[idx], "m0") == 0) {
+            motor = (motor_select_t) atoi(values[idx]);
+        }
+        else if (strcmp(params[idx], "m1") == 0) {
+            speed = strtof_locale(values[idx]);
+        }
+        else if (strcmp(params[idx], "m2") == 0) {
+            duration_ms = (uint32_t) atoi(values[idx]);
+        }
+    }
+
+    motor_tap(motor, speed, duration_ms);
+
+    snprintf(json_buffer, sizeof(json_buffer),
+             "%s{\"m0\":%d,\"m1\":%.1f,\"m2\":%lu}",
+             http_json_header, (int) motor, speed, duration_ms);
+
+    size_t response_len = strlen(json_buffer);
+    file->data = json_buffer;
+    file->len = response_len;
+    file->index = response_len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
+
     return true;
 }

@@ -28,7 +28,7 @@ extern char wifi_ip_address[16];  // Current IP address
 extern "C" {
 #endif
 
-// Config management (uses flash, not EEPROM)
+// Config management (uses EEPROM)
 bool wireless_config_init(void);
 bool wireless_config_save(void);
 

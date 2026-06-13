@@ -163,9 +163,6 @@ int main()
 
     printf("\n=== OpenTrickler v2.9.0 RP2350 ===\n");
 
-    // Load WiFi credentials from flash (just reads flash memory, no hardware init)
-    wireless_config_init();
-
     // REST app control init (creates the REST event queue)
     if (!rest_app_control_init()) {
         printf("REST app control init FAILED!\n");
@@ -181,6 +178,9 @@ int main()
         printf("EEPROM init OK\n");
         error_set_eeprom_ready(true);
     }
+
+    // Load WiFi credentials from EEPROM (requires EEPROM to be initialized)
+    wireless_config_init();
 
     // Neopixel init
     if (!neopixel_led_init()) {

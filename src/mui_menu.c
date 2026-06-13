@@ -24,6 +24,10 @@ extern servo_gate_t servo_gate;
 extern scale_config_t scale_config;
 extern eeprom_profile_data_t profile_data;
 
+// Coarse reverse settings (uint8_t mirrors for MUI editing)
+static uint8_t coarse_reverse_speed_x10 = 20;  // speed * 10 (20 = 2.0 rps)
+static uint8_t coarse_reverse_time_x10 = 20;    // time / 10 (20 = 200ms)
+
 
 const char * get_selected_profile_name(void * data, uint16_t idx) {
     return profile_data.profiles[idx].name;
@@ -232,6 +236,284 @@ uint8_t render_ml_data_toggle(mui_t *ui, uint8_t msg) {
 
 
 
+uint8_t render_coarse_reverse_speed(mui_t *ui, uint8_t msg) {
+    if (msg == MUIF_MSG_FORM_START) {
+        coarse_reverse_speed_x10 = (uint8_t)(charge_mode_config.eeprom_charge_mode_data.coarse_reverse_speed_rps * 10.0f + 0.5f);
+        if (coarse_reverse_speed_x10 > 99) coarse_reverse_speed_x10 = 99;
+    }
+
+    switch(msg) {
+        case MUIF_MSG_DRAW: {
+            u8g2_t *u8g2 = mui_get_U8g2(ui);
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f rps", (float)coarse_reverse_speed_x10 / 10.0f);
+            u8g2_SetFont(u8g2, u8g2_font_helvR08_tr);
+            if (mui_IsCursorFocus(ui)) {
+                uint8_t flags = U8G2_BTN_INV;
+                if (ui->is_mud) flags |= U8G2_BTN_XFRAME;
+                u8g2_DrawButtonUTF8(u8g2, mui_get_x(ui), mui_get_y(ui), flags, 0, 1, 1, buf);
+            } else {
+                u8g2_DrawStr(u8g2, mui_get_x(ui), mui_get_y(ui), buf);
+            }
+            return 0;
+        }
+        case MUIF_MSG_CURSOR_SELECT:
+            ui->is_mud = !ui->is_mud;
+            if (!ui->is_mud) {
+                charge_mode_config.eeprom_charge_mode_data.coarse_reverse_speed_rps = (float)coarse_reverse_speed_x10 / 10.0f;
+                charge_mode_config_save();
+            }
+            return 0;
+        case MUIF_MSG_EVENT_NEXT:
+            if (ui->is_mud) {
+                if (coarse_reverse_speed_x10 < 99) coarse_reverse_speed_x10++;
+                return 1;
+            }
+            break;
+        case MUIF_MSG_EVENT_PREV:
+            if (ui->is_mud) {
+                if (coarse_reverse_speed_x10 > 0) coarse_reverse_speed_x10--;
+                return 1;
+            }
+            break;
+        case MUIF_MSG_CURSOR_LEAVE:
+            ui->is_mud = 0;
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+uint8_t render_coarse_reverse_time(mui_t *ui, uint8_t msg) {
+    if (msg == MUIF_MSG_FORM_START) {
+        coarse_reverse_time_x10 = (uint8_t)(charge_mode_config.eeprom_charge_mode_data.coarse_reverse_time_ms / 10);
+        if (coarse_reverse_time_x10 > 99) coarse_reverse_time_x10 = 99;
+    }
+
+    switch(msg) {
+        case MUIF_MSG_DRAW: {
+            u8g2_t *u8g2 = mui_get_U8g2(ui);
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d ms", coarse_reverse_time_x10 * 10);
+            u8g2_SetFont(u8g2, u8g2_font_helvR08_tr);
+            if (mui_IsCursorFocus(ui)) {
+                uint8_t flags = U8G2_BTN_INV;
+                if (ui->is_mud) flags |= U8G2_BTN_XFRAME;
+                u8g2_DrawButtonUTF8(u8g2, mui_get_x(ui), mui_get_y(ui), flags, 0, 1, 1, buf);
+            } else {
+                u8g2_DrawStr(u8g2, mui_get_x(ui), mui_get_y(ui), buf);
+            }
+            return 0;
+        }
+        case MUIF_MSG_CURSOR_SELECT:
+            ui->is_mud = !ui->is_mud;
+            if (!ui->is_mud) {
+                charge_mode_config.eeprom_charge_mode_data.coarse_reverse_time_ms = (uint32_t)coarse_reverse_time_x10 * 10;
+                charge_mode_config_save();
+            }
+            return 0;
+        case MUIF_MSG_EVENT_NEXT:
+            if (ui->is_mud) {
+                if (coarse_reverse_time_x10 < 99) coarse_reverse_time_x10++;
+                return 1;
+            }
+            break;
+        case MUIF_MSG_EVENT_PREV:
+            if (ui->is_mud) {
+                if (coarse_reverse_time_x10 > 0) coarse_reverse_time_x10--;
+                return 1;
+            }
+            break;
+        case MUIF_MSG_CURSOR_LEAVE:
+            ui->is_mud = 0;
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+
+// Profile parameter editor
+typedef struct {
+    const char *name;
+    float min;
+    float max;
+    float step;
+} profile_param_def_t;
+
+static const profile_param_def_t profile_param_defs[] = {
+    {"C.Kp", 0.0f, 10.0f, 0.01f},
+    {"C.Ki", 0.0f, 10.0f, 0.01f},
+    {"C.Kd", 0.0f, 10.0f, 0.01f},
+    {"F.Kp", 0.0f, 10.0f, 0.01f},
+    {"F.Ki", 0.0f, 10.0f, 0.01f},
+    {"F.Kd", 0.0f, 10.0f, 0.01f},
+    {"C.Min", 0.0f, 5.0f, 0.01f},
+    {"C.Max", 0.0f, 5.0f, 0.01f},
+    {"F.Min", 0.0f, 5.0f, 0.01f},
+    {"F.Max", 0.0f, 5.0f, 0.01f},
+};
+
+#define PROFILE_PARAM_COUNT (sizeof(profile_param_defs) / sizeof(profile_param_defs[0]))
+
+static float profile_edit_values[PROFILE_PARAM_COUNT];
+static uint8_t profile_edit_idx = 0;
+static uint8_t profile_edit_consecutive = 0;
+
+static void profile_edit_load_values(void) {
+    profile_t *p = profile_get_selected();
+    profile_edit_values[0] = p->coarse_kp;
+    profile_edit_values[1] = p->coarse_ki;
+    profile_edit_values[2] = p->coarse_kd;
+    profile_edit_values[3] = p->fine_kp;
+    profile_edit_values[4] = p->fine_ki;
+    profile_edit_values[5] = p->fine_kd;
+    profile_edit_values[6] = p->coarse_min_flow_speed_rps;
+    profile_edit_values[7] = p->coarse_max_flow_speed_rps;
+    profile_edit_values[8] = p->fine_min_flow_speed_rps;
+    profile_edit_values[9] = p->fine_max_flow_speed_rps;
+    profile_edit_idx = 0;
+    profile_edit_consecutive = 0;
+}
+
+static void profile_edit_save_values(void) {
+    profile_t *p = profile_get_selected();
+    p->coarse_kp = profile_edit_values[0];
+    p->coarse_ki = profile_edit_values[1];
+    p->coarse_kd = profile_edit_values[2];
+    p->fine_kp = profile_edit_values[3];
+    p->fine_ki = profile_edit_values[4];
+    p->fine_kd = profile_edit_values[5];
+    p->coarse_min_flow_speed_rps = profile_edit_values[6];
+    p->coarse_max_flow_speed_rps = profile_edit_values[7];
+    p->fine_min_flow_speed_rps = profile_edit_values[8];
+    p->fine_max_flow_speed_rps = profile_edit_values[9];
+    profile_data_save();
+}
+
+#define PROFILE_SLOT_SAVE  PROFILE_PARAM_COUNT
+#define PROFILE_SLOT_CANCEL (PROFILE_PARAM_COUNT + 1)
+#define PROFILE_SLOT_TOTAL  (PROFILE_PARAM_COUNT + 2)
+
+uint8_t render_profile_editor(mui_t *ui, uint8_t msg) {
+    switch(msg) {
+        case MUIF_MSG_FORM_START:
+            profile_edit_load_values();
+            profile_edit_idx = 0;
+            break;
+        case MUIF_MSG_DRAW: {
+            u8g2_t *u8g2 = mui_get_U8g2(ui);
+            char buf[24];
+
+            if (profile_edit_idx < PROFILE_PARAM_COUNT) {
+                const profile_param_def_t *def = &profile_param_defs[profile_edit_idx];
+                float val = profile_edit_values[profile_edit_idx];
+
+                u8g2_SetFont(u8g2, u8g2_font_helvB08_tr);
+                snprintf(buf, sizeof(buf), "%s (%d/%d)", def->name, profile_edit_idx + 1, (int)PROFILE_PARAM_COUNT);
+                u8g2_DrawStr(u8g2, 5, 22, buf);
+
+                u8g2_SetFont(u8g2, u8g2_font_profont22_tf);
+                snprintf(buf, sizeof(buf), "%.3f", val);
+                uint8_t w = u8g2_GetStrWidth(u8g2, buf);
+                uint8_t x_pos = (128 - w) / 2;
+
+                if (ui->is_mud) {
+                    u8g2_DrawBox(u8g2, x_pos - 2, 24, w + 4, 20);
+                    u8g2_SetDrawColor(u8g2, 0);
+                    u8g2_DrawStr(u8g2, x_pos, 41, buf);
+                    u8g2_SetDrawColor(u8g2, 1);
+                } else {
+                    u8g2_DrawStr(u8g2, x_pos, 41, buf);
+                }
+            }
+
+            u8g2_SetFont(u8g2, u8g2_font_helvR08_tr);
+
+            if (ui->is_mud && profile_edit_idx < PROFILE_PARAM_COUNT) {
+                float step = profile_param_defs[profile_edit_idx].step;
+                if (profile_edit_consecutive > 5) step *= 10.0f;
+                snprintf(buf, sizeof(buf), "Step: %.2f", step);
+                u8g2_DrawStr(u8g2, 5, 52, buf);
+            }
+
+            // Save / Cancel buttons at bottom
+            {
+                uint8_t save_w = u8g2_GetStrWidth(u8g2, "Save");
+                uint8_t cancel_w = u8g2_GetStrWidth(u8g2, "Cancel");
+                uint8_t save_x = 50 - save_w / 2;
+                uint8_t cancel_x = 100 - cancel_w / 2;
+
+                if (profile_edit_idx == PROFILE_SLOT_SAVE) {
+                    u8g2_DrawBox(u8g2, save_x - 3, 53, save_w + 6, 12);
+                    u8g2_SetDrawColor(u8g2, 0);
+                    u8g2_DrawStr(u8g2, save_x, 63, "Save");
+                    u8g2_SetDrawColor(u8g2, 1);
+                    u8g2_DrawStr(u8g2, cancel_x, 63, "Cancel");
+                } else if (profile_edit_idx == PROFILE_SLOT_CANCEL) {
+                    u8g2_DrawBox(u8g2, cancel_x - 3, 53, cancel_w + 6, 12);
+                    u8g2_SetDrawColor(u8g2, 0);
+                    u8g2_DrawStr(u8g2, cancel_x, 63, "Cancel");
+                    u8g2_SetDrawColor(u8g2, 1);
+                    u8g2_DrawStr(u8g2, save_x, 63, "Save");
+                } else {
+                    u8g2_DrawStr(u8g2, save_x, 63, "Save");
+                    u8g2_DrawStr(u8g2, cancel_x, 63, "Cancel");
+                }
+            }
+
+            return 0;
+        }
+        case MUIF_MSG_CURSOR_SELECT:
+            if (profile_edit_idx == PROFILE_SLOT_SAVE) {
+                profile_edit_save_values();
+                mui_GotoFormAutoCursorPosition(ui, 34);
+                return 1;
+            } else if (profile_edit_idx == PROFILE_SLOT_CANCEL) {
+                mui_GotoFormAutoCursorPosition(ui, 34);
+                return 1;
+            } else {
+                ui->is_mud = !ui->is_mud;
+                profile_edit_consecutive = 0;
+                return 1;
+            }
+        case MUIF_MSG_EVENT_NEXT:
+            if (ui->is_mud && profile_edit_idx < PROFILE_PARAM_COUNT) {
+                profile_edit_consecutive++;
+                float step = profile_param_defs[profile_edit_idx].step;
+                if (profile_edit_consecutive > 5) step *= 10.0f;
+                profile_edit_values[profile_edit_idx] += step;
+                if (profile_edit_values[profile_edit_idx] > profile_param_defs[profile_edit_idx].max)
+                    profile_edit_values[profile_edit_idx] = profile_param_defs[profile_edit_idx].max;
+                return 1;
+            } else {
+                if (profile_edit_idx < PROFILE_SLOT_TOTAL - 1) profile_edit_idx++;
+                return 1;
+            }
+        case MUIF_MSG_EVENT_PREV:
+            if (ui->is_mud && profile_edit_idx < PROFILE_PARAM_COUNT) {
+                profile_edit_consecutive++;
+                float step = profile_param_defs[profile_edit_idx].step;
+                if (profile_edit_consecutive > 5) step *= 10.0f;
+                profile_edit_values[profile_edit_idx] -= step;
+                if (profile_edit_values[profile_edit_idx] < profile_param_defs[profile_edit_idx].min)
+                    profile_edit_values[profile_edit_idx] = profile_param_defs[profile_edit_idx].min;
+                return 1;
+            } else {
+                if (profile_edit_idx > 0) profile_edit_idx--;
+                return 1;
+            }
+        case MUIF_MSG_CURSOR_LEAVE:
+            ui->is_mud = 0;
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
 muif_t muif_list[] = {
         /* normal text style */
         MUIF_U8G2_FONT_STYLE(0, u8g2_font_helvR08_tr),
@@ -276,6 +558,13 @@ muif_t muif_list[] = {
 
         // ML data collection toggle
         MUIF_VARIABLE("ML", &ml_data_enabled_u8, render_ml_data_toggle),
+
+        // Coarse tube reverse settings
+        MUIF_VARIABLE("RS", &coarse_reverse_speed_x10, render_coarse_reverse_speed),
+        MUIF_VARIABLE("RT", &coarse_reverse_time_x10, render_coarse_reverse_time),
+
+        // Profile editor
+        MUIF_VARIABLE("PE", NULL, render_profile_editor),
 
         // input for a number between 0 to 9 //
         MUIF_U8G2_U8_MIN_MAX("N4", &charge_weight_digits[4], 0, 9, mui_u8g2_u8_min_max_wm_mud_pi),
@@ -408,7 +697,8 @@ fds_t fds_data[] = {
         MUI_32 "Profile Manager|"
         MUI_37 "EEPROM|"
         MUI_39 "Servo Gate|"
-        MUI_45 "ML Data|"
+        MUI_45 "ML Data Collection|"
+        MUI_46 "Coarse Rev|"
         MUI_35 "Reboot|"
         MUI_36 "Version|"
         MUI_1 "<-Return"  // Back to main menu
@@ -464,28 +754,30 @@ fds_t fds_data[] = {
     // Menu 34: profile details (PID)
     MUI_FORM(34)
     MUI_STYLE(1)
-    MUI_LABEL(5,10, "Profile Details (1/2)")
+    MUI_LABEL(5,10, "Profile PID")
     MUI_XY("HL", 0,13)
 
     // Draw details
     MUI_AUX("P3")
 
     MUI_STYLE(0)
-    MUI_XYAT("BN",115, 59, 38, "Next")  // Jump next to page 38
-    MUI_XYAT("BN",14, 59, 32, "Back")  // Jump back to form 30
+    MUI_XYAT("BN",115, 59, 47, "Edit")
+    MUI_XYAT("BN",64, 59, 38, "Next")
+    MUI_XYAT("BN",14, 59, 32, "Back")
 
     // Menu 38: profile details (others)
     MUI_FORM(38)
     MUI_STYLE(1)
-    MUI_LABEL(5,10, "Profile Details (2/2)")
+    MUI_LABEL(5,10, "Profile Speeds")
     MUI_XY("HL", 0,13)
 
     // Draw details
     MUI_AUX("P4")
 
     MUI_STYLE(0)
-    MUI_XYAT("BN",115, 59, 30, "Exit")  // Jump back to form 30
-    MUI_XYAT("BN",14, 59, 34, "Back")  // Jump next to page 30
+    MUI_XYAT("BN",115, 59, 47, "Edit")
+    MUI_XYAT("BN",64, 59, 30, "Exit")
+    MUI_XYAT("BN",14, 59, 34, "Back")
 
 
     // Menu 35: Reboot
@@ -550,6 +842,20 @@ fds_t fds_data[] = {
     MUI_XYAT("ML", 5, 49, 1, "Enable")
     MUI_XYAT("BN", 64, 59, 30, " OK ")  // Jump to form 30
 
+    // Coarse Tube Reverse submenu
+    MUI_FORM(46)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "Coarse Tube Reverse")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(0)
+    MUI_LABEL(5, 25, "Speed:")
+    MUI_XY("RS", 45, 25)
+    MUI_LABEL(5, 37, "Time:")
+    MUI_XY("RT", 45, 37)
+    MUI_LABEL(5, 49, "(0 ms = disabled)")
+    MUI_XYAT("BN", 64, 59, 30, " OK ")  // Jump to form 30
+
     // Wirelss submenu
     MUI_FORM(40)
     MUI_STYLE(1)
@@ -566,8 +872,17 @@ fds_t fds_data[] = {
     MUI_XYA("GC", 5, 49, 2) 
     MUI_XYA("GC", 5, 61, 3)
 
+    // Profile editor
+    MUI_FORM(47)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "Edit Profile")
+    MUI_XY("HL", 0,13)
+
+    MUI_XY("PE", 5, 25)
+
     // Wifi info
     MUI_FORM(41)
+    MUI_STYLE(1)
     MUI_LABEL(5,10, "Wifi Info")
     MUI_XY("HL", 0,13)
 

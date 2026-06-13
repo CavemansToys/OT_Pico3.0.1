@@ -42,7 +42,7 @@ bool http_rest_ai_tuning_start(struct fs_file *file, int num_params,
             profile_idx = atoi(values[idx]);
         }
         else if (strcmp(params[idx], "target") == 0) {
-            target_weight = strtof(values[idx], NULL);
+            target_weight = strtof_locale(values[idx]);
         }
     }
 
@@ -534,28 +534,31 @@ bool http_rest_ai_tuning_config_get(struct fs_file *file, int num_params,
 bool http_rest_ai_tuning_config_set(struct fs_file *file, int num_params,
                                        char *params[], char *values[]) {
     ai_tuning_config_t* cfg = ai_tuning_get_config();
+    bool save_to_eeprom = false;
 
     for (int idx = 0; idx < num_params; idx++) {
         if (strcmp(params[idx], "coarse_kp_min") == 0)
-            cfg->coarse_kp_min = strtof(values[idx], NULL);
+            cfg->coarse_kp_min = strtof_locale(values[idx]);
         else if (strcmp(params[idx], "coarse_kp_max") == 0)
-            cfg->coarse_kp_max = strtof(values[idx], NULL);
+            cfg->coarse_kp_max = strtof_locale(values[idx]);
         else if (strcmp(params[idx], "coarse_kd_min") == 0)
-            cfg->coarse_kd_min = strtof(values[idx], NULL);
+            cfg->coarse_kd_min = strtof_locale(values[idx]);
         else if (strcmp(params[idx], "coarse_kd_max") == 0)
-            cfg->coarse_kd_max = strtof(values[idx], NULL);
+            cfg->coarse_kd_max = strtof_locale(values[idx]);
         else if (strcmp(params[idx], "fine_kp_min") == 0)
-            cfg->fine_kp_min = strtof(values[idx], NULL);
+            cfg->fine_kp_min = strtof_locale(values[idx]);
         else if (strcmp(params[idx], "fine_kp_max") == 0)
-            cfg->fine_kp_max = strtof(values[idx], NULL);
+            cfg->fine_kp_max = strtof_locale(values[idx]);
         else if (strcmp(params[idx], "fine_kd_min") == 0)
-            cfg->fine_kd_min = strtof(values[idx], NULL);
+            cfg->fine_kd_min = strtof_locale(values[idx]);
         else if (strcmp(params[idx], "fine_kd_max") == 0)
-            cfg->fine_kd_max = strtof(values[idx], NULL);
+            cfg->fine_kd_max = strtof_locale(values[idx]);
         else if (strcmp(params[idx], "noise_margin") == 0)
-            cfg->noise_margin = strtof(values[idx], NULL);
+            cfg->noise_margin = strtof_locale(values[idx]);
         else if (strcmp(params[idx], "max_overthrow_percent") == 0)
-            cfg->max_overthrow_percent = strtof(values[idx], NULL);
+            cfg->max_overthrow_percent = strtof_locale(values[idx]);
+        else if (strcmp(params[idx], "ee") == 0)
+            save_to_eeprom = string_to_boolean(values[idx]);
     }
 
     printf("AI Tuning config updated: C_Kp[%.3f-%.3f] C_Kd[%.3f-%.3f] F_Kp[%.3f-%.3f] F_Kd[%.3f-%.3f] noise=%.3f\n",
@@ -565,11 +568,12 @@ bool http_rest_ai_tuning_config_set(struct fs_file *file, int num_params,
            cfg->fine_kd_min, cfg->fine_kd_max,
            cfg->noise_margin);
 
-    // Config applied to memory - user must click Save to persist to EEPROM
-    // (follows same pattern as motor config, scale config, etc.)
+    if (save_to_eeprom) {
+        ai_tuning_save_config();
+    }
 
     int len = snprintf(ai_tuning_json_buffer, sizeof(ai_tuning_json_buffer),
-        "%s{\"success\":true,\"message\":\"Config applied (click Save to persist)\"}",
+        "%s{\"success\":true,\"message\":\"Config applied\"}",
         http_json_header);
 
     if (len < 0 || len >= (int)sizeof(ai_tuning_json_buffer)) {

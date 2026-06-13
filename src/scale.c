@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <semphr.h>
 #include <inttypes.h>
+#include <task.h>
 
 #include "configuration.h"
 #include "scale.h"
@@ -12,6 +13,9 @@
 #include "scale.h"
 #include "common.h"
 #include "error.h"
+#include "charge_mode.h"
+
+extern charge_mode_config_t charge_mode_config;
 
 extern scale_handle_t and_fxi_scale_handle;
 extern scale_handle_t steinberg_scale_handle;
@@ -236,12 +240,135 @@ float scale_get_current_measurement() {
 }
 
 
+typedef enum {
+    SIM_ZERO = 0,
+    SIM_COARSE,
+    SIM_COARSE_SETTLE,
+    SIM_FINE,
+    SIM_CHARGE_DONE,
+    SIM_CUP_REMOVED,
+    SIM_CUP_RETURNED,
+} sim_phase_t;
+
+static bool sim_active = false;
+static float sim_weight = 0.0f;
+static float sim_target = 30.0f;
+static sim_phase_t sim_phase = SIM_ZERO;
+static TickType_t sim_phase_start_tick = 0;
+static uint16_t sim_tick_count = 0;
+
+void scale_sim_start(float target) {
+    sim_active = true;
+    sim_weight = 0.0f;
+    sim_target = target;
+    sim_phase = SIM_ZERO;
+    sim_phase_start_tick = xTaskGetTickCount();
+    sim_tick_count = 0;
+    printf("SIM: Started with target=%.3f\n", target);
+}
+
+void scale_sim_stop(void) {
+    sim_active = false;
+    sim_weight = 0.0f;
+    printf("SIM: Stopped\n");
+}
+
+bool scale_sim_is_active(void) {
+    return sim_active;
+}
+
+static float scale_sim_next_measurement(void) {
+    vTaskDelay(pdMS_TO_TICKS(200));
+    sim_tick_count++;
+
+    switch (sim_phase) {
+        case SIM_ZERO:
+            sim_weight = 0.0f;
+            if (sim_tick_count >= 12) {
+                printf("SIM: Phase COARSE\n");
+                sim_phase = SIM_COARSE;
+                sim_tick_count = 0;
+            }
+            break;
+
+        case SIM_COARSE: {
+            float coarse_target = sim_target - 5.0f;
+            float rate = coarse_target / 40.0f;
+            sim_weight += rate;
+            if (sim_weight >= coarse_target) {
+                sim_weight = coarse_target;
+                printf("SIM: Phase COARSE_SETTLE (weight=%.3f)\n", sim_weight);
+                sim_phase = SIM_COARSE_SETTLE;
+                sim_tick_count = 0;
+            }
+            break;
+        }
+
+        case SIM_COARSE_SETTLE:
+            if (sim_tick_count >= 5) {
+                printf("SIM: Phase FINE (weight=%.3f)\n", sim_weight);
+                sim_phase = SIM_FINE;
+                sim_tick_count = 0;
+            }
+            break;
+
+        case SIM_FINE: {
+            float rate = 0.1f;
+            sim_weight += rate;
+            if (sim_weight >= sim_target - 0.03f) {
+                sim_weight = sim_target;
+                printf("SIM: Phase CHARGE_DONE (weight=%.3f)\n", sim_weight);
+                sim_phase = SIM_CHARGE_DONE;
+                sim_tick_count = 0;
+            }
+            break;
+        }
+
+        case SIM_CHARGE_DONE:
+            sim_weight = sim_target;
+            if (sim_tick_count >= 25) {
+                printf("SIM: Phase CUP_REMOVED\n");
+                sim_phase = SIM_CUP_REMOVED;
+                sim_tick_count = 0;
+            }
+            break;
+
+        case SIM_CUP_REMOVED:
+            sim_weight = -50.0f;
+            if (sim_tick_count >= 15) {
+                printf("SIM: Phase CUP_RETURNED\n");
+                sim_phase = SIM_CUP_RETURNED;
+                sim_tick_count = 0;
+            }
+            break;
+
+        case SIM_CUP_RETURNED:
+            sim_weight = sim_target;
+            if (sim_tick_count >= 10) {
+                printf("SIM: Cycle complete, restarting\n");
+                sim_phase = SIM_ZERO;
+                sim_tick_count = 0;
+                sim_weight = 0.0f;
+            }
+            break;
+    }
+
+    scale_config.current_scale_measurement = sim_weight;
+    return sim_weight;
+}
+
+
 /*
     Block wait for the next available measurement.
 
     block_time_ms set to 0 to wait indefinitely.
 */
 bool scale_block_wait_for_next_measurement(uint32_t block_time_ms, float * current_measurement) {
+    if (sim_active) {
+        *current_measurement = scale_sim_next_measurement();
+        return true;
+    }
+
     TickType_t delay_ticks;
 
     if (block_time_ms == 0) {

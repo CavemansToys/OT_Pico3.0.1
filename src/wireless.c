@@ -1,31 +1,30 @@
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <stddef.h>
 
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
-#include "hardware/flash.h"
-#include "pico/flash.h"
 
 #include "wireless.h"
 #include "http_rest.h"
 #include "common.h"
+#include "eeprom.h"
+#include "display.h"
+#include "encoder.h"
 
-// Fixed flash offset for WiFi config - works for both pico_w (2MB) and pico2_w (4MB)
-// Located at 960KB, after firmware (~750KB) but before OTA staging (1MB+)
-#define WIFI_FLASH_OFFSET  0x0F0000  // 960KB - fixed location regardless of flash size
-#define CONFIG_MAGIC 0x57494649  // "WIFI" in hex
+#define EEPROM_WIFI_DATA_REV 2
 
-// WiFi credentials structure for flash storage
+// WiFi credentials structure for EEPROM storage
 typedef struct {
-    uint32_t magic;
+    uint16_t rev;
     char home_ssid[33];
     char home_password[64];
     uint32_t auth_method;
     uint32_t timeout_ms;
-    bool wifi_enabled;
-    uint32_t checksum;
-} wifi_credentials_t;
+    uint32_t wifi_enabled;
+    uint32_t crc;
+} eeprom_wifi_data_t;
 
 // Global WiFi config - exposed for REST API
 char home_ssid[33];
@@ -38,94 +37,57 @@ bool home_wifi_enabled = true;
 char wifi_ssid[33] = "Not Connected";
 char wifi_ip_address[16] = "0.0.0.0";
 
-// Calculate simple checksum
-static uint32_t calculate_checksum(const wifi_credentials_t *creds) {
-    uint32_t sum = creds->magic;
-    for (size_t i = 0; i < sizeof(creds->home_ssid); i++) sum += creds->home_ssid[i];
-    for (size_t i = 0; i < sizeof(creds->home_password); i++) sum += creds->home_password[i];
-    sum += creds->auth_method + creds->timeout_ms + (creds->wifi_enabled ? 1 : 0);
-    return sum;
-}
 
-// Read WiFi credentials from flash
-static bool read_wifi_credentials(wifi_credentials_t *creds) {
-    const uint8_t *flash_ptr = (const uint8_t *)(XIP_BASE + WIFI_FLASH_OFFSET);
-    memcpy(creds, flash_ptr, sizeof(wifi_credentials_t));
-    if (creds->magic != CONFIG_MAGIC) {
-        printf("No valid WiFi config at 0x%X\n", WIFI_FLASH_OFFSET);
-        return false;
-    }
-    if (creds->checksum != calculate_checksum(creds)) {
-        printf("WiFi config checksum mismatch\n");
-        return false;
-    }
-    printf("Valid WiFi config found at 0x%X\n", WIFI_FLASH_OFFSET);
-    return true;
-}
 
-// Static buffer for flash write (must persist during flash_safe_execute callback)
-static uint8_t g_wifi_write_buffer[FLASH_PAGE_SIZE] __attribute__((aligned(4)));
-
-// Callback for flash_safe_execute - performs the actual erase + program
-static void wifi_flash_write_callback(void *param) {
-    (void)param;
-    flash_range_erase(WIFI_FLASH_OFFSET, FLASH_SECTOR_SIZE);
-    flash_range_program(WIFI_FLASH_OFFSET, g_wifi_write_buffer, FLASH_PAGE_SIZE);
-}
-
-// Write WiFi credentials to flash
-static bool write_wifi_credentials(void) {
-    wifi_credentials_t creds = {0};
-    snprintf(creds.home_ssid, sizeof(creds.home_ssid), "%s", home_ssid);
-    snprintf(creds.home_password, sizeof(creds.home_password), "%s", home_password);
-    creds.auth_method = home_auth_method;
-    creds.timeout_ms = home_timeout_ms;
-    creds.wifi_enabled = home_wifi_enabled;
-    creds.magic = CONFIG_MAGIC;
-    creds.checksum = calculate_checksum(&creds);
-
-    printf("Writing WiFi credentials to flash at 0x%X...\n", WIFI_FLASH_OFFSET);
-
-    // Prepare write buffer
-    memset(g_wifi_write_buffer, 0, FLASH_PAGE_SIZE);
-    memcpy(g_wifi_write_buffer, &creds, sizeof(wifi_credentials_t));
-
-    // Use flash_safe_execute for FreeRTOS-safe flash programming
-    int rc = flash_safe_execute(wifi_flash_write_callback, NULL, 1000);
-    if (rc != PICO_OK) {
-        printf("ERROR: flash_safe_execute failed with %d\n", rc);
-        return false;
-    }
-
-    // Verify write
-    wifi_credentials_t verify = {0};
-    if (!read_wifi_credentials(&verify)) {
-        printf("ERROR: Flash write verification failed\n");
-        return false;
-    }
-    printf("WiFi credentials written and verified\n");
-    return true;
-}
-
-// Load WiFi config from flash on startup
+// Load WiFi config from EEPROM on startup
 bool wireless_config_init(void) {
-    wifi_credentials_t saved_creds = {0};
-    bool has_saved = read_wifi_credentials(&saved_creds);
+    // Always register the save handler so eeprom_save_all() includes WiFi
+    eeprom_register_handler(wireless_config_save);
 
-    if (has_saved) {
-        snprintf(home_ssid, sizeof(home_ssid), "%s", saved_creds.home_ssid);
-        snprintf(home_password, sizeof(home_password), "%s", saved_creds.home_password);
-        home_auth_method = saved_creds.auth_method;
-        home_timeout_ms = saved_creds.timeout_ms;
-        home_wifi_enabled = saved_creds.wifi_enabled;
-        printf("Loaded WiFi config: SSID=%s\n", home_ssid);
+    eeprom_wifi_data_t eeprom_data = {0};
+    bool is_ok = eeprom_read(EEPROM_APP_CONFIG_BASE_ADDR, (uint8_t *) &eeprom_data, sizeof(eeprom_wifi_data_t));
+
+    if (!is_ok || eeprom_data.rev != EEPROM_WIFI_DATA_REV) {
+        printf("WiFi EEPROM config invalid or not found, using defaults\n");
+        return false;
     }
-    return has_saved;
+
+    // Verify CRC
+    uint32_t expected_crc = software_crc32(&eeprom_data, offsetof(eeprom_wifi_data_t, crc));
+    if (eeprom_data.crc != expected_crc) {
+        printf("WiFi EEPROM config CRC mismatch\n");
+        return false;
+    }
+
+    snprintf(home_ssid, sizeof(home_ssid), "%s", eeprom_data.home_ssid);
+    snprintf(home_password, sizeof(home_password), "%s", eeprom_data.home_password);
+    home_auth_method = eeprom_data.auth_method;
+    home_timeout_ms = eeprom_data.timeout_ms;
+    home_wifi_enabled = eeprom_data.wifi_enabled;
+    printf("Loaded WiFi config from EEPROM: SSID=%s\n", home_ssid);
+
+    return true;
 }
 
-// Save WiFi config to flash
+// Save WiFi config to EEPROM
 bool wireless_config_save(void) {
-    return write_wifi_credentials();
+    eeprom_wifi_data_t eeprom_data = {0};
+    eeprom_data.rev = EEPROM_WIFI_DATA_REV;
+    snprintf(eeprom_data.home_ssid, sizeof(eeprom_data.home_ssid), "%s", home_ssid);
+    snprintf(eeprom_data.home_password, sizeof(eeprom_data.home_password), "%s", home_password);
+    eeprom_data.auth_method = home_auth_method;
+    eeprom_data.timeout_ms = home_timeout_ms;
+    eeprom_data.wifi_enabled = home_wifi_enabled ? 1 : 0;
+    eeprom_data.crc = software_crc32(&eeprom_data, offsetof(eeprom_wifi_data_t, crc));
+
+    printf("Writing WiFi credentials to EEPROM...\n");
+    bool is_ok = eeprom_write(EEPROM_APP_CONFIG_BASE_ADDR, (uint8_t *) &eeprom_data, sizeof(eeprom_wifi_data_t));
+    if (is_ok) {
+        printf("WiFi credentials written to EEPROM\n");
+    } else {
+        printf("ERROR: Failed to write WiFi credentials to EEPROM\n");
+    }
+    return is_ok;
 }
 
 // REST API handler for wireless configuration
@@ -136,7 +98,7 @@ bool http_rest_wireless_config(struct fs_file *file, int num_params, char *param
     // w2 (int): auth
     // w3 (int): timeout_ms
     // w4 (bool): enable
-    // save (bool): save to flash
+    // ee (bool): save to EEPROM
 
     static char wireless_config_json_buffer[256];
     bool save_config = false;
@@ -165,7 +127,7 @@ bool http_rest_wireless_config(struct fs_file *file, int num_params, char *param
         else if (strcmp(params[idx], "w4") == 0) {
             home_wifi_enabled = string_to_boolean(values[idx]);
         }
-        else if (strcmp(params[idx], "save") == 0) {
+        else if (strcmp(params[idx], "ee") == 0) {
             save_config = string_to_boolean(values[idx]);
         }
     }
@@ -210,9 +172,42 @@ void pico_led_set(bool on) {
     cyw43_gpio_set(&cyw43_state, LED_GPIO, on);
 }
 
-// Stub for menu compatibility - WiFi info now shown via web portal
 uint8_t wireless_view_wifi_info(void) {
-    return 40;  // Returns to the Wireless menu
+    u8g2_t *display_handler = get_display_handler();
+
+    acquire_display_buffer_access();
+    u8g2_ClearBuffer(display_handler);
+
+    u8g2_SetFont(display_handler, u8g2_font_helvB08_tr);
+    u8g2_DrawStr(display_handler, 5, 10, "WiFi Info");
+    u8g2_DrawHLine(display_handler, 0, 13, u8g2_GetDisplayWidth(display_handler));
+
+    u8g2_SetFont(display_handler, u8g2_font_profont11_tf);
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "SSID: %.20s", wifi_ssid);
+    u8g2_DrawStr(display_handler, 3, 26, buf);
+
+    snprintf(buf, sizeof(buf), "IP: %.15s", wifi_ip_address);
+    u8g2_DrawStr(display_handler, 3, 38, buf);
+
+    snprintf(buf, sizeof(buf), "Cfg: %.20s", home_ssid);
+    u8g2_DrawStr(display_handler, 3, 50, buf);
+
+    u8g2_SetFont(display_handler, u8g2_font_helvR08_tr);
+    u8g2_DrawStr(display_handler, 45, 62, "[OK]");
+
+    u8g2_SendBuffer(display_handler);
+    release_display_buffer_access();
+
+    while (true) {
+        ButtonEncoderEvent_t event = button_wait_for_input(true);
+        if (event == BUTTON_ENCODER_PRESSED || event == BUTTON_RST_PRESSED) {
+            break;
+        }
+    }
+
+    return 40;
 }
 
 bool http_rest_pico_led(struct fs_file *file, int num_params, char *params[], char *values[]) {
