@@ -11,7 +11,6 @@ Based on [OpenTrickler-RP2040-Controller](https://github.com/eamars/OpenTrickler
 | Board | SoC |
 |---|---|
 | Raspberry Pi Pico 2 W | RP2350 - Tested|
-| Raspberry Pi Pico W | RP2040 
 
 ## Features
 
